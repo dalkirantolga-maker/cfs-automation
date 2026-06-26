@@ -1,3 +1,4 @@
+!pip install ...
 import streamlit as st
 !pip install ipywidgets pdfplumber openpyxl -q
 
