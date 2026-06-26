@@ -156,6 +156,88 @@ st.set_page_config(
     page_icon="⚓",
     layout="wide"
 )
+st.markdown("""
+<style>
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #001f3f 0%, #003366 100%);
+}
+
+[data-testid="stSidebar"] * {
+    color: white !important;
+}
+
+.main {
+    background-color: #f5f7fb;
+}
+
+h1, h2, h3 {
+    color: #001f3f;
+    font-family: Arial, sans-serif;
+}
+
+.metric-card {
+    padding: 25px;
+    border-radius: 18px;
+    color: white;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.12);
+    margin-bottom: 15px;
+}
+
+.blue-card {
+    background: linear-gradient(135deg, #005bea, #00c6fb);
+}
+
+.orange-card {
+    background: linear-gradient(135deg, #f7971e, #ffd200);
+}
+
+.green-card {
+    background: linear-gradient(135deg, #11998e, #38ef7d);
+}
+
+.purple-card {
+    background: linear-gradient(135deg, #7f00ff, #e100ff);
+}
+
+.red-card {
+    background: linear-gradient(135deg, #ff416c, #ff4b2b);
+}
+
+.metric-title {
+    font-size: 15px;
+    font-weight: bold;
+}
+
+.metric-value {
+    font-size: 34px;
+    font-weight: bold;
+    margin-top: 10px;
+}
+
+.metric-sub {
+    font-size: 13px;
+    opacity: 0.9;
+}
+
+.block-container {
+    padding-top: 25px;
+}
+
+.stButton > button {
+    border-radius: 10px;
+    background: #005bea;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    font-weight: bold;
+}
+
+.stButton > button:hover {
+    background: #003f9e;
+    color: white;
+}
+</style>
+""", unsafe_allow_html=True)
 
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
@@ -172,7 +254,12 @@ st.markdown("""
 """)
 
 role = st.session_state["role"]
+if os.path.exists("logo.png"):
+    st.sidebar.image("logo.png", width=180)
 
+st.sidebar.markdown("## ⚓ ALPORT CFS")
+st.sidebar.markdown("### Automation System")
+st.sidebar.markdown("---")
 st.sidebar.title("Menü")
 
 if role == "Admin":
@@ -212,10 +299,37 @@ if menu == "Dashboard":
     opened = len(df[df["CFS Durumu"] == "CFS Açıldı"]) if not df.empty else 0
     delivered = len(df[df["CFS Durumu"] == "Delivery Yapıldı"]) if not df.empty else 0
 
-    col1.metric("Toplam Kayıt", total)
-    col2.metric("Bekleyen", waiting)
-    col3.metric("CFS Açıldı", opened)
-    col4.metric("Delivery Yapıldı", delivered)
+ col1.markdown(f"""
+<div class="metric-card blue-card">
+    <div class="metric-title">📦 TOPLAM KAYIT</div>
+    <div class="metric-value">{total}</div>
+    <div class="metric-sub">Tüm kayıtlar</div>
+</div>
+""", unsafe_allow_html=True)
+
+col2.markdown(f"""
+<div class="metric-card orange-card">
+    <div class="metric-title">⏳ BEKLEYEN</div>
+    <div class="metric-value">{waiting}</div>
+    <div class="metric-sub">Bekleyen konteyner</div>
+</div>
+""", unsafe_allow_html=True)
+
+col3.markdown(f"""
+<div class="metric-card green-card">
+    <div class="metric-title">✅ CFS AÇILDI</div>
+    <div class="metric-value">{opened}</div>
+    <div class="metric-sub">CFS işlemi açıldı</div>
+</div>
+""", unsafe_allow_html=True)
+
+col4.markdown(f"""
+<div class="metric-card purple-card">
+    <div class="metric-title">🚛 DELIVERY YAPILDI</div>
+    <div class="metric-value">{delivered}</div>
+    <div class="metric-sub">Teslim edildi</div>
+</div>
+""", unsafe_allow_html=True)
 
     st.markdown("---")
     st.subheader("Son Kayıtlar")
