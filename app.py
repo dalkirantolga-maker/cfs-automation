@@ -224,9 +224,9 @@ st.sidebar.markdown("---")
 role = st.session_state.role
 
 if role == "Admin":
-    menus = ["Dashboard", "Delivery Order Kaydı", "Kayıt Ara", "Tüm Kayıtlar", "Excel İndir"]
+   menus = ["Dashboard", "Delivery Order Kaydı", "Kayıt Düzenle / Sil", "Kayıt Ara", "Tüm Kayıtlar", "Excel İndir"]
 elif role == "CFS Personeli":
-    menus = ["Dashboard", "Delivery Order Kaydı", "Kayıt Ara", "Tüm Kayıtlar"]
+    menus = ["Dashboard", "Delivery Order Kaydı", "Kayıt Düzenle / Sil", "Kayıt Ara", "Tüm Kayıtlar"]
 else:
     menus = ["Dashboard", "Kayıt Ara", "Tüm Kayıtlar"]
 
@@ -404,3 +404,91 @@ elif menu == "Excel İndir":
             file_name="CFS_KAYITLARI.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+        elif menu == "Kayıt Düzenle / Sil":
+    st.subheader("✏️ Kayıt Düzenle / Sil")
+
+    search_edit = st.text_input("Düzenlenecek Container No / DO No / BL No girin")
+
+    if search_edit:
+        result = df[
+            df["Container No"].astype(str).str.contains(search_edit, case=False, na=False) |
+            df["DO No"].astype(str).str.contains(search_edit, case=False, na=False) |
+            df["BL No"].astype(str).str.contains(search_edit, case=False, na=False)
+        ]
+
+        if result.empty:
+            st.warning("Kayıt bulunamadı.")
+        else:
+            st.dataframe(result, use_container_width=True)
+
+            selected_index = st.selectbox(
+                "Düzenlenecek kaydı seç",
+                result.index.tolist()
+            )
+
+            selected_row = df.loc[selected_index]
+
+            st.markdown("### Kayıt Bilgilerini Düzenle")
+
+            col1, col2 = st.columns(2)
+
+            with col1:
+                edit_container = st.text_input("Container No", selected_row["Container No"])
+                edit_do = st.text_input("DO No", selected_row["DO No"])
+                edit_bl = st.text_input("BL No", selected_row["BL No"])
+                edit_acente = st.text_input("Acente", selected_row["Acente"])
+                edit_consignee = st.text_input("Consignee", selected_row["Consignee"])
+                edit_vessel = st.text_input("Vessel", selected_row["Vessel"])
+
+            with col2:
+                edit_voyage = st.text_input("Voyage", selected_row["Voyage"])
+                edit_size = st.text_input("Size/Type", selected_row["Size/Type"])
+                edit_seal = st.text_input("Seal No", selected_row["Seal No"])
+                edit_exp = st.text_input("EXP Date", selected_row["EXP Date"])
+                edit_status = st.selectbox(
+                    "CFS Durumu",
+                    ["Bekliyor", "CFS Açıldı", "Delivery Yapıldı", "İptal"],
+                    index=["Bekliyor", "CFS Açıldı", "Delivery Yapıldı", "İptal"].index(selected_row["CFS Durumu"])
+                    if selected_row["CFS Durumu"] in ["Bekliyor", "CFS Açıldı", "Delivery Yapıldı", "İptal"] else 0
+                )
+                edit_damage = st.selectbox(
+                    "Hasar Durumu",
+                    ["Yok", "Var"],
+                    index=["Yok", "Var"].index(selected_row["Hasar Durumu"])
+                    if selected_row["Hasar Durumu"] in ["Yok", "Var"] else 0
+                )
+
+            edit_note = st.text_area("Not", selected_row["Not"])
+
+            col_save, col_delete = st.columns(2)
+
+            with col_save:
+                if st.button("💾 Değişiklikleri Kaydet", use_container_width=True):
+                    df.loc[selected_index, "Container No"] = edit_container.upper().strip()
+                    df.loc[selected_index, "DO No"] = edit_do.strip()
+                    df.loc[selected_index, "BL No"] = edit_bl.strip()
+                    df.loc[selected_index, "Acente"] = edit_acente.strip()
+                    df.loc[selected_index, "Consignee"] = edit_consignee.strip()
+                    df.loc[selected_index, "Vessel"] = edit_vessel.strip()
+                    df.loc[selected_index, "Voyage"] = edit_voyage.strip()
+                    df.loc[selected_index, "Size/Type"] = edit_size.strip()
+                    df.loc[selected_index, "Seal No"] = edit_seal.strip()
+                    df.loc[selected_index, "EXP Date"] = edit_exp.strip()
+                    df.loc[selected_index, "CFS Durumu"] = edit_status
+                    df.loc[selected_index, "Hasar Durumu"] = edit_damage
+                    df.loc[selected_index, "Not"] = edit_note.strip()
+
+                    save_data(df)
+                    st.success("Kayıt başarıyla güncellendi.")
+
+            with col_delete:
+                if role == "Admin":
+                    if st.button("🗑️ Kaydı Sil", use_container_width=True):
+                        df = df.drop(index=selected_index)
+                        df = df.reset_index(drop=True)
+                        save_data(df)
+                        st.success("Kayıt silindi.")
+                else:
+                    st.info("Kayıt silme yetkisi sadece Admin kullanıcısındadır.")
+    else:
+        st.info("Düzenleme yapmak için arama alanına bilgi girin.")
