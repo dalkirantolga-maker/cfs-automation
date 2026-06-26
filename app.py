@@ -209,8 +209,16 @@ if not st.session_state.logged_in:
 
 create_file()
 
-st.sidebar.markdown("## ⚓ ALPORT")
-st.sidebar.markdown("### CFS SYSTEM")
+if os.path.exists("logo.png"):
+    st.sidebar.image("logo.png", width=190)
+
+st.sidebar.markdown("""
+<div style="text-align:center; margin-bottom:20px;">
+    <h2 style="color:white;">ALPORT</h2>
+    <p style="color:#00C6FB; font-weight:bold;">CFS AUTOMATION SYSTEM</p>
+</div>
+""", unsafe_allow_html=True)
+
 st.sidebar.markdown("---")
 
 role = st.session_state.role
