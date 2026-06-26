@@ -7,6 +7,12 @@ from datetime import datetime
 
 DATA_FILE = "CFS_KAYITLARI.xlsx"
 
+USERS = {
+    "admin": {"password": "1234", "role": "Admin"},
+    "cfs": {"password": "1234", "role": "CFS Personeli"},
+    "viewer": {"password": "1234", "role": "Viewer"}
+}
+
 COLUMNS = [
     "Kayıt Tarihi",
     "Container No",
@@ -28,17 +34,23 @@ COLUMNS = [
     "Truck No",
     "Driver Name",
     "Released By",
+    "Kayıt Yapan Kullanıcı",
     "Not"
 ]
 
 def create_file_if_not_exists():
     if not os.path.exists(DATA_FILE):
-        df = pd.DataFrame(columns=COLUMNS)
-        df.to_excel(DATA_FILE, index=False)
+        pd.DataFrame(columns=COLUMNS).to_excel(DATA_FILE, index=False)
 
 def read_data():
     create_file_if_not_exists()
-    return pd.read_excel(DATA_FILE)
+    df = pd.read_excel(DATA_FILE)
+
+    for col in COLUMNS:
+        if col not in df.columns:
+            df[col] = ""
+
+    return df[COLUMNS]
 
 def save_data(df):
     df.to_excel(DATA_FILE, index=False)
@@ -49,12 +61,6 @@ def extract_pdf_text(uploaded_file):
         for page in pdf.pages:
             text += "\n" + (page.extract_text() or "")
     return text
-
-def find_value(pattern, text):
-    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
-    if match:
-        return match.group(1).strip()
-    return ""
 
 def parse_delivery_order(text):
     data = {
@@ -82,53 +88,117 @@ def parse_delivery_order(text):
     if bl_match:
         data["BL No"] = bl_match.group(1)
 
-    vessel_match = re.search(r"\b(CONTSHIP\s+[A-Z]+|HORIZON|JONATHAN\s+P|MARTI\s+SPIRIT|MATILDE\s+A)\b", text, re.IGNORECASE)
+    vessel_match = re.search(
+        r"\b(CONTSHIP\s+[A-Z]+|HORIZON|JONATHAN\s+P|MARTI\s+SPIRIT|MATILDE\s+A)\b",
+        text,
+        re.IGNORECASE
+    )
     if vessel_match:
         data["Vessel"] = vessel_match.group(1).upper()
 
-    voyage_match = re.search(r"\b([A-Z0-9]{8,12})\b", text)
+    voyage_match = re.search(r"\b[0-9A-Z]{4,12}\b", text)
     if voyage_match:
-        data["Voyage"] = voyage_match.group(1)
+        data["Voyage"] = voyage_match.group(0)
 
     size_match = re.search(r"\b(20GP|20DC|20DV|40GP|40HC|40HQ|45HC)\b", text, re.IGNORECASE)
     if size_match:
         data["Size/Type"] = size_match.group(1).upper()
 
-    seal_match = re.search(r"\b([A-Z]\d{7}|[A-Z0-9]{7,10})\b", text)
+    seal_match = re.search(r"\b[A-Z0-9]{7,10}\b", text)
     if seal_match:
-        data["Seal No"] = seal_match.group(1)
+        data["Seal No"] = seal_match.group(0)
 
-    exp_match = re.search(r"EXP DATE\s*.*?(\d{2}-[A-Z]{3}-\d{2,4})", text, re.IGNORECASE | re.DOTALL)
-    if not exp_match:
+    exp_match = re.search(
+        r"EXP DATE\s*.*?(\d{2}-[A-Z]{3}-\d{2,4})",
+        text,
+        re.IGNORECASE | re.DOTALL
+    )
+    if exp_match:
+        data["EXP Date"] = exp_match.group(1).upper()
+    else:
         dates = re.findall(r"\b\d{2}-[A-Z]{3}-\d{2,4}\b", text, re.IGNORECASE)
         if dates:
             data["EXP Date"] = dates[0].upper()
-    else:
-        data["EXP Date"] = exp_match.group(1).upper()
 
     if "CMA CGM" in text.upper():
         data["Acente"] = "CMA CGM"
 
     return data
 
+def login_screen():
+    st.markdown("# ⚓ ALPORT CFS SYSTEM")
+    st.markdown("### Kullanıcı Girişi")
+
+    username = st.text_input("Kullanıcı Adı")
+    password = st.text_input("Şifre", type="password")
+
+    if st.button("Giriş Yap"):
+        if username in USERS and USERS[username]["password"] == password:
+            st.session_state["logged_in"] = True
+            st.session_state["username"] = username
+            st.session_state["role"] = USERS[username]["role"]
+            st.success("Giriş başarılı.")
+            st.rerun()
+        else:
+            st.error("Kullanıcı adı veya şifre hatalı.")
+
+def logout_button():
+    st.sidebar.markdown("---")
+    st.sidebar.write(f"👤 Kullanıcı: **{st.session_state['username']}**")
+    st.sidebar.write(f"🔐 Yetki: **{st.session_state['role']}**")
+
+    if st.sidebar.button("Çıkış Yap"):
+        st.session_state.clear()
+        st.rerun()
+
 st.set_page_config(
-    page_title="CFS Otomasyon Sistemi",
+    page_title="ALPORT CFS System",
     page_icon="⚓",
     layout="wide"
 )
 
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_screen()
+    st.stop()
+
+create_file_if_not_exists()
+
 st.markdown("""
-# ⚓ CFS OTOMASYON SİSTEMİ
+# ⚓ ALPORT CFS SYSTEM
 ### Delivery Order & Konteyner Takip Paneli
 """)
 
-st.sidebar.title("Menü")
-menu = st.sidebar.radio(
-    "Sayfa Seç",
-    ["Dashboard", "Delivery Order Kaydı", "Kayıt Ara", "Tüm Kayıtlar", "Excel İndir"]
-)
+role = st.session_state["role"]
 
-create_file_if_not_exists()
+st.sidebar.title("Menü")
+
+if role == "Admin":
+    menu_options = [
+        "Dashboard",
+        "Delivery Order Kaydı",
+        "Kayıt Ara",
+        "Tüm Kayıtlar",
+        "Excel İndir"
+    ]
+elif role == "CFS Personeli":
+    menu_options = [
+        "Dashboard",
+        "Delivery Order Kaydı",
+        "Kayıt Ara",
+        "Tüm Kayıtlar"
+    ]
+else:
+    menu_options = [
+        "Dashboard",
+        "Kayıt Ara",
+        "Tüm Kayıtlar"
+    ]
+
+menu = st.sidebar.radio("Sayfa Seç", menu_options)
+logout_button()
 
 if menu == "Dashboard":
     df = read_data()
@@ -244,6 +314,7 @@ elif menu == "Delivery Order Kaydı":
                 "Truck No": truck_no.strip(),
                 "Driver Name": driver_name.strip(),
                 "Released By": released_by.strip(),
+                "Kayıt Yapan Kullanıcı": st.session_state["username"],
                 "Not": note.strip()
             }
 
