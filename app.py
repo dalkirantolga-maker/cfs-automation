@@ -1,23 +1,13 @@
-!pip install ...
 import streamlit as st
-!pip install ipywidgets pdfplumber openpyxl -q
-
-import os, re, shutil
 import pandas as pd
 import pdfplumber
-import ipywidgets as widgets
-from IPython.display import display, HTML, clear_output
-from google.colab import files
+import re
+import os
 from datetime import datetime
 
-# ==============================
-# KLASÖR VE DOSYA AYARLARI
-# ==============================
 DATA_FILE = "CFS_KAYITLARI.xlsx"
-PDF_FOLDER = "DELIVERY_ORDER_PDF"
-os.makedirs(PDF_FOLDER, exist_ok=True)
 
-columns = [
+COLUMNS = [
     "Kayıt Tarihi",
     "Container No",
     "DO No",
@@ -38,34 +28,35 @@ columns = [
     "Truck No",
     "Driver Name",
     "Released By",
-    "PDF Dosya Yolu",
     "Not"
 ]
 
-if not os.path.exists(DATA_FILE):
-    pd.DataFrame(columns=columns).to_excel(DATA_FILE, index=False)
+def create_file_if_not_exists():
+    if not os.path.exists(DATA_FILE):
+        df = pd.DataFrame(columns=COLUMNS)
+        df.to_excel(DATA_FILE, index=False)
 
-# ==============================
-# PDF OKUMA FONKSİYONU
-# ==============================
-def pdf_text_extract(pdf_path):
+def read_data():
+    create_file_if_not_exists()
+    return pd.read_excel(DATA_FILE)
+
+def save_data(df):
+    df.to_excel(DATA_FILE, index=False)
+
+def extract_pdf_text(uploaded_file):
     text = ""
-    try:
-        with pdfplumber.open(pdf_path) as pdf:
-            for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                text += "\n" + page_text
-    except Exception as e:
-        print("PDF okunamadı:", e)
+    with pdfplumber.open(uploaded_file) as pdf:
+        for page in pdf.pages:
+            text += "\n" + (page.extract_text() or "")
     return text
 
-def find_value(pattern, text, default=""):
-    match = re.search(pattern, text, re.IGNORECASE)
-    return match.group(1).strip() if match else default
+def find_value(pattern, text):
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
 
-def parse_delivery_order(pdf_path):
-    text = pdf_text_extract(pdf_path)
-
+def parse_delivery_order(text):
     data = {
         "Container No": "",
         "DO No": "",
@@ -79,318 +70,224 @@ def parse_delivery_order(pdf_path):
         "EXP Date": ""
     }
 
-    # Container No
-    cont_match = re.search(r"\b[A-Z]{4}\d{7}\b", text)
-    if cont_match:
-        data["Container No"] = cont_match.group(0)
+    container_match = re.search(r"\b[A-Z]{4}\d{7}\b", text)
+    if container_match:
+        data["Container No"] = container_match.group(0)
 
-    # Delivery Order No
-    data["DO No"] = find_value(r"DELIVERY ORDER NO\s*[:\-]?\s*([A-Z0-9]+)", text)
+    do_match = re.search(r"DELIVERY ORDER NO\s*[:\-]?\s*([A-Z0-9]+)", text, re.IGNORECASE)
+    if do_match:
+        data["DO No"] = do_match.group(1)
 
-    # BL No
-    data["BL No"] = find_value(r"B/L\s*-\s*NO\s*[:\-]?\s*([A-Z0-9]+)", text)
+    bl_match = re.search(r"B/L\s*-\s*NO\s*[:\-]?\s*([A-Z0-9]+)", text, re.IGNORECASE)
+    if bl_match:
+        data["BL No"] = bl_match.group(1)
 
-    # Vessel
-    data["Vessel"] = find_value(r"VESSEL\s*[:\-]?\s*([A-Z0-9\s]+)", text)
-    if data["Vessel"]:
-        data["Vessel"] = data["Vessel"].split("\n")[0].strip()
+    vessel_match = re.search(r"\b(CONTSHIP\s+[A-Z]+|HORIZON|JONATHAN\s+P|MARTI\s+SPIRIT|MATILDE\s+A)\b", text, re.IGNORECASE)
+    if vessel_match:
+        data["Vessel"] = vessel_match.group(1).upper()
 
-    # Voyage
-    data["Voyage"] = find_value(r"VOYAGE\s*[:\-]?\s*([A-Z0-9]+)", text)
+    voyage_match = re.search(r"\b([A-Z0-9]{8,12})\b", text)
+    if voyage_match:
+        data["Voyage"] = voyage_match.group(1)
 
-    # Size / Type
-    size_match = re.search(r"\b(20GP|20DV|20DC|40GP|40HC|40HQ|45HC)\b", text, re.IGNORECASE)
+    size_match = re.search(r"\b(20GP|20DC|20DV|40GP|40HC|40HQ|45HC)\b", text, re.IGNORECASE)
     if size_match:
         data["Size/Type"] = size_match.group(1).upper()
 
-    # Seal No
-    seal_match = re.search(r"SEAL\s*([A-Z0-9]+)", text, re.IGNORECASE)
+    seal_match = re.search(r"\b([A-Z]\d{7}|[A-Z0-9]{7,10})\b", text)
     if seal_match:
         data["Seal No"] = seal_match.group(1)
 
-    # EXP Date
     exp_match = re.search(r"EXP DATE\s*.*?(\d{2}-[A-Z]{3}-\d{2,4})", text, re.IGNORECASE | re.DOTALL)
     if not exp_match:
-        exp_match = re.search(r"\b(\d{2}-[A-Z]{3}-\d{2})\b", text, re.IGNORECASE)
-    if exp_match:
+        dates = re.findall(r"\b\d{2}-[A-Z]{3}-\d{2,4}\b", text, re.IGNORECASE)
+        if dates:
+            data["EXP Date"] = dates[0].upper()
+    else:
         data["EXP Date"] = exp_match.group(1).upper()
 
-    # Acente
     if "CMA CGM" in text.upper():
         data["Acente"] = "CMA CGM"
 
-    # Consignee - basit tahmin
-    lines = [x.strip() for x in text.split("\n") if x.strip()]
-    for line in lines[:20]:
-        if not any(word in line.upper() for word in ["DELIVERY", "PAGE", "CMA", "B/L", "VESSEL", "VOYAGE"]):
-            if len(line) > 3:
-                data["Consignee"] = line
-                break
+    return data
 
-    return data, text
-
-# ==============================
-# KAYIT FONKSİYONLARI
-# ==============================
-def load_data():
-    return pd.read_excel(DATA_FILE)
-
-def save_data(df):
-    df.to_excel(DATA_FILE, index=False)
-
-def show_header():
-    display(HTML("""
-    <div style="
-        background: linear-gradient(90deg, #002b5c, #0077b6);
-        padding: 20px;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        font-family: Arial;
-        margin-bottom: 20px;">
-        <h1>⚓ CFS OTOMASYON SİSTEMİ</h1>
-        <h3>Delivery Order & Konteyner Takip Paneli</h3>
-    </div>
-    """))
-
-# ==============================
-# WIDGET ALANLARI
-# ==============================
-container_no = widgets.Text(description="Container:", layout=widgets.Layout(width="400px"))
-do_no = widgets.Text(description="DO No:", layout=widgets.Layout(width="400px"))
-bl_no = widgets.Text(description="BL No:", layout=widgets.Layout(width="400px"))
-acente = widgets.Text(description="Acente:", layout=widgets.Layout(width="400px"))
-consignee = widgets.Text(description="Consignee:", layout=widgets.Layout(width="400px"))
-vessel = widgets.Text(description="Vessel:", layout=widgets.Layout(width="400px"))
-voyage = widgets.Text(description="Voyage:", layout=widgets.Layout(width="400px"))
-size_type = widgets.Text(description="Size/Type:", layout=widgets.Layout(width="400px"))
-seal_no = widgets.Text(description="Seal No:", layout=widgets.Layout(width="400px"))
-exp_date = widgets.Text(description="EXP Date:", layout=widgets.Layout(width="400px"))
-
-cfs_durumu = widgets.Dropdown(
-    options=["Bekliyor", "CFS Açıldı", "Delivery Yapıldı", "İptal"],
-    description="Durum:",
-    layout=widgets.Layout(width="400px")
+st.set_page_config(
+    page_title="CFS Otomasyon Sistemi",
+    page_icon="⚓",
+    layout="wide"
 )
 
-acim_tarihi = widgets.Text(description="Açım Tarihi:", placeholder="örn: 26-06-2026", layout=widgets.Layout(width="400px"))
-cargo_type = widgets.Text(description="Cargo:", layout=widgets.Layout(width="400px"))
-quantity = widgets.Text(description="Quantity:", layout=widgets.Layout(width="400px"))
-hasar = widgets.Dropdown(options=["Yok", "Var"], description="Hasar:", layout=widgets.Layout(width="400px"))
-delivery_tarihi = widgets.Text(description="Delivery:", placeholder="örn: 26-06-2026", layout=widgets.Layout(width="400px"))
-truck_no = widgets.Text(description="Truck No:", layout=widgets.Layout(width="400px"))
-driver = widgets.Text(description="Driver:", layout=widgets.Layout(width="400px"))
-released_by = widgets.Text(description="Released:", layout=widgets.Layout(width="400px"))
-note = widgets.Textarea(description="Not:", layout=widgets.Layout(width="500px", height="80px"))
+st.markdown("""
+# ⚓ CFS OTOMASYON SİSTEMİ
+### Delivery Order & Konteyner Takip Paneli
+""")
 
-pdf_path_global = ""
+st.sidebar.title("Menü")
+menu = st.sidebar.radio(
+    "Sayfa Seç",
+    ["Dashboard", "Delivery Order Kaydı", "Kayıt Ara", "Tüm Kayıtlar", "Excel İndir"]
+)
 
-# ==============================
-# BUTON FONKSİYONLARI
-# ==============================
-def upload_pdf_clicked(b):
-    global pdf_path_global
+create_file_if_not_exists()
 
-    clear_output()
-    show_header()
+if menu == "Dashboard":
+    df = read_data()
 
-    print("Lütfen Delivery Order PDF dosyasını seçin...")
-    uploaded = files.upload()
+    st.subheader("📊 Dashboard")
 
-    if not uploaded:
-        print("PDF yüklenmedi.")
-        return
+    col1, col2, col3, col4 = st.columns(4)
 
-    file_name = list(uploaded.keys())[0]
-    original_path = file_name
+    total = len(df)
+    waiting = len(df[df["CFS Durumu"] == "Bekliyor"]) if not df.empty else 0
+    opened = len(df[df["CFS Durumu"] == "CFS Açıldı"]) if not df.empty else 0
+    delivered = len(df[df["CFS Durumu"] == "Delivery Yapıldı"]) if not df.empty else 0
 
-    data, text = parse_delivery_order(original_path)
+    col1.metric("Toplam Kayıt", total)
+    col2.metric("Bekleyen", waiting)
+    col3.metric("CFS Açıldı", opened)
+    col4.metric("Delivery Yapıldı", delivered)
 
-    cont = data["Container No"] if data["Container No"] else "UNKNOWN"
-    new_pdf_name = f"{cont}_DELIVERY_ORDER.pdf"
-    new_pdf_path = os.path.join(PDF_FOLDER, new_pdf_name)
-    shutil.copy(original_path, new_pdf_path)
-    pdf_path_global = new_pdf_path
+    st.markdown("---")
+    st.subheader("Son Kayıtlar")
+    st.dataframe(df.tail(10), use_container_width=True)
 
-    container_no.value = data["Container No"]
-    do_no.value = data["DO No"]
-    bl_no.value = data["BL No"]
-    acente.value = data["Acente"]
-    consignee.value = data["Consignee"]
-    vessel.value = data["Vessel"]
-    voyage.value = data["Voyage"]
-    size_type.value = data["Size/Type"]
-    seal_no.value = data["Seal No"]
-    exp_date.value = data["EXP Date"]
+elif menu == "Delivery Order Kaydı":
+    st.subheader("📄 Delivery Order PDF Yükle")
 
-    print("✅ PDF yüklendi ve bilgiler okundu.")
-    print("PDF Dosya Yolu:", pdf_path_global)
+    uploaded_pdf = st.file_uploader("PDF dosyası seç", type=["pdf"])
 
-    display_form()
-
-def save_clicked(b):
-    global pdf_path_global
-
-    df = load_data()
-
-    if container_no.value.strip() == "":
-        print("❌ Container No boş olamaz.")
-        return
-
-    new_row = {
-        "Kayıt Tarihi": datetime.now().strftime("%d-%m-%Y %H:%M"),
-        "Container No": container_no.value.upper().strip(),
-        "DO No": do_no.value.strip(),
-        "BL No": bl_no.value.strip(),
-        "Acente": acente.value.strip(),
-        "Consignee": consignee.value.strip(),
-        "Vessel": vessel.value.strip(),
-        "Voyage": voyage.value.strip(),
-        "Size/Type": size_type.value.strip(),
-        "Seal No": seal_no.value.strip(),
-        "EXP Date": exp_date.value.strip(),
-        "CFS Durumu": cfs_durumu.value,
-        "Açım Tarihi": acim_tarihi.value.strip(),
-        "Cargo Type": cargo_type.value.strip(),
-        "Quantity": quantity.value.strip(),
-        "Hasar Durumu": hasar.value,
-        "Delivery Tarihi": delivery_tarihi.value.strip(),
-        "Truck No": truck_no.value.strip(),
-        "Driver Name": driver.value.strip(),
-        "Released By": released_by.value.strip(),
-        "PDF Dosya Yolu": pdf_path_global,
-        "Not": note.value.strip()
+    parsed = {
+        "Container No": "",
+        "DO No": "",
+        "BL No": "",
+        "Acente": "",
+        "Consignee": "",
+        "Vessel": "",
+        "Voyage": "",
+        "Size/Type": "",
+        "Seal No": "",
+        "EXP Date": ""
     }
 
-    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-    save_data(df)
+    if uploaded_pdf is not None:
+        try:
+            text = extract_pdf_text(uploaded_pdf)
+            parsed = parse_delivery_order(text)
+            st.success("PDF okundu. Bilgileri kontrol edip kaydedebilirsiniz.")
+        except Exception as e:
+            st.error(f"PDF okunamadı: {e}")
 
-    print("✅ Kayıt başarıyla kaydedildi.")
+    st.markdown("### Konteyner / DO Bilgileri")
 
-def search_clicked(b):
-    clear_output()
-    show_header()
+    col1, col2 = st.columns(2)
 
-    aranan = search_box.value.upper().strip()
-    df = load_data()
+    with col1:
+        container_no = st.text_input("Container No", value=parsed["Container No"])
+        do_no = st.text_input("Delivery Order No", value=parsed["DO No"])
+        bl_no = st.text_input("B/L No", value=parsed["BL No"])
+        acente = st.text_input("Acente", value=parsed["Acente"])
+        consignee = st.text_input("Consignee", value=parsed["Consignee"])
 
-    if aranan == "":
-        print("❌ Arama alanı boş olamaz.")
-        display_main()
-        return
+    with col2:
+        vessel = st.text_input("Vessel", value=parsed["Vessel"])
+        voyage = st.text_input("Voyage", value=parsed["Voyage"])
+        size_type = st.text_input("Size / Type", value=parsed["Size/Type"])
+        seal_no = st.text_input("Seal No", value=parsed["Seal No"])
+        exp_date = st.text_input("EXP Date", value=parsed["EXP Date"])
 
-    result = df[
-        df["Container No"].astype(str).str.upper().str.contains(aranan, na=False) |
-        df["DO No"].astype(str).str.upper().str.contains(aranan, na=False) |
-        df["BL No"].astype(str).str.upper().str.contains(aranan, na=False)
-    ]
+    st.markdown("### CFS Operasyon Bilgileri")
 
-    if result.empty:
-        print("❌ Kayıt bulunamadı.")
+    col3, col4 = st.columns(2)
+
+    with col3:
+        cfs_durumu = st.selectbox(
+            "CFS Durumu",
+            ["Bekliyor", "CFS Açıldı", "Delivery Yapıldı", "İptal"]
+        )
+        acim_tarihi = st.text_input("Açım Tarihi", placeholder="Örn: 26-06-2026")
+        cargo_type = st.text_input("Cargo Type")
+        quantity = st.text_input("Quantity")
+
+    with col4:
+        hasar = st.selectbox("Hasar Durumu", ["Yok", "Var"])
+        delivery_tarihi = st.text_input("Delivery Tarihi", placeholder="Örn: 26-06-2026")
+        truck_no = st.text_input("Truck No")
+        driver_name = st.text_input("Driver Name")
+        released_by = st.text_input("Released By")
+
+    note = st.text_area("Not")
+
+    if st.button("💾 Kaydet"):
+        if container_no.strip() == "":
+            st.error("Container No boş olamaz.")
+        else:
+            df = read_data()
+
+            new_row = {
+                "Kayıt Tarihi": datetime.now().strftime("%d-%m-%Y %H:%M"),
+                "Container No": container_no.upper().strip(),
+                "DO No": do_no.strip(),
+                "BL No": bl_no.strip(),
+                "Acente": acente.strip(),
+                "Consignee": consignee.strip(),
+                "Vessel": vessel.strip(),
+                "Voyage": voyage.strip(),
+                "Size/Type": size_type.strip(),
+                "Seal No": seal_no.strip(),
+                "EXP Date": exp_date.strip(),
+                "CFS Durumu": cfs_durumu,
+                "Açım Tarihi": acim_tarihi.strip(),
+                "Cargo Type": cargo_type.strip(),
+                "Quantity": quantity.strip(),
+                "Hasar Durumu": hasar,
+                "Delivery Tarihi": delivery_tarihi.strip(),
+                "Truck No": truck_no.strip(),
+                "Driver Name": driver_name.strip(),
+                "Released By": released_by.strip(),
+                "Not": note.strip()
+            }
+
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+            save_data(df)
+            st.success("Kayıt başarıyla kaydedildi.")
+
+elif menu == "Kayıt Ara":
+    st.subheader("🔎 Kayıt Ara")
+
+    search = st.text_input("Container No / DO No / BL No / Vessel ile ara")
+
+    df = read_data()
+
+    if search:
+        result = df[
+            df["Container No"].astype(str).str.contains(search, case=False, na=False) |
+            df["DO No"].astype(str).str.contains(search, case=False, na=False) |
+            df["BL No"].astype(str).str.contains(search, case=False, na=False) |
+            df["Vessel"].astype(str).str.contains(search, case=False, na=False)
+        ]
+
+        if result.empty:
+            st.warning("Kayıt bulunamadı.")
+        else:
+            st.dataframe(result, use_container_width=True)
     else:
-        display(HTML("<h3>🔎 Arama Sonuçları</h3>"))
-        display(result)
+        st.info("Arama yapmak için bilgi girin.")
 
-    display_main()
+elif menu == "Tüm Kayıtlar":
+    st.subheader("📋 Tüm CFS Kayıtları")
+    df = read_data()
+    st.dataframe(df, use_container_width=True)
 
-def list_clicked(b):
-    clear_output()
-    show_header()
-    df = load_data()
-    display(HTML("<h3>📋 Tüm CFS Kayıtları</h3>"))
-    display(df)
-    display_main()
+elif menu == "Excel İndir":
+    st.subheader("⬇️ Excel İndir")
 
-def download_excel_clicked(b):
-    files.download(DATA_FILE)
+    df = read_data()
+    st.dataframe(df, use_container_width=True)
 
-def download_all_clicked(b):
-    zip_name = "CFS_SISTEM_YEDEK.zip"
-    if os.path.exists(zip_name):
-        os.remove(zip_name)
-
-    shutil.make_archive("CFS_SISTEM_YEDEK", "zip", ".", PDF_FOLDER)
-
-    temp_folder = "TEMP_CFS_BACKUP"
-    os.makedirs(temp_folder, exist_ok=True)
-    shutil.copy(DATA_FILE, os.path.join(temp_folder, DATA_FILE))
-
-    shutil.make_archive("CFS_EXCEL_YEDEK", "zip", temp_folder)
-
-    print("✅ PDF klasörü indiriliyor...")
-    files.download(zip_name)
-    print("✅ Excel dosyası indiriliyor...")
-    files.download(DATA_FILE)
-
-def clear_form_clicked(b):
-    global pdf_path_global
-    pdf_path_global = ""
-
-    for w in [
-        container_no, do_no, bl_no, acente, consignee,
-        vessel, voyage, size_type, seal_no, exp_date,
-        acim_tarihi, cargo_type, quantity,
-        delivery_tarihi, truck_no, driver, released_by, note
-    ]:
-        w.value = ""
-
-    cfs_durumu.value = "Bekliyor"
-    hasar.value = "Yok"
-    print("🧹 Form temizlendi.")
-
-# ==============================
-# BUTONLAR
-# ==============================
-upload_pdf_btn = widgets.Button(description="📎 Delivery Order PDF Yükle", button_style="info")
-save_btn = widgets.Button(description="💾 Kaydet", button_style="success")
-clear_btn = widgets.Button(description="🧹 Formu Temizle", button_style="warning")
-
-search_box = widgets.Text(description="Ara:", placeholder="Container / DO / BL No", layout=widgets.Layout(width="400px"))
-search_btn = widgets.Button(description="🔎 Ara", button_style="primary")
-list_btn = widgets.Button(description="📋 Tüm Liste", button_style="")
-download_excel_btn = widgets.Button(description="⬇️ Excel İndir", button_style="success")
-download_all_btn = widgets.Button(description="📦 PDF Yedek İndir", button_style="")
-
-upload_pdf_btn.on_click(upload_pdf_clicked)
-save_btn.on_click(save_clicked)
-clear_btn.on_click(clear_form_clicked)
-search_btn.on_click(search_clicked)
-list_btn.on_click(list_clicked)
-download_excel_btn.on_click(download_excel_clicked)
-download_all_btn.on_click(download_all_clicked)
-
-# ==============================
-# EKRANLAR
-# ==============================
-def display_form():
-    display(HTML("<h3>📝 CFS Kayıt Formu</h3>"))
-    display(upload_pdf_btn)
-
-    display(widgets.HBox([container_no, do_no]))
-    display(widgets.HBox([bl_no, acente]))
-    display(widgets.HBox([consignee, vessel]))
-    display(widgets.HBox([voyage, size_type]))
-    display(widgets.HBox([seal_no, exp_date]))
-
-    display(HTML("<hr><h4>CFS Operasyon Bilgileri</h4>"))
-    display(widgets.HBox([cfs_durumu, acim_tarihi]))
-    display(widgets.HBox([cargo_type, quantity]))
-    display(widgets.HBox([hasar, delivery_tarihi]))
-    display(widgets.HBox([truck_no, driver]))
-    display(released_by)
-    display(note)
-
-    display(widgets.HBox([save_btn, clear_btn]))
-
-def display_main():
-    display(HTML("<hr><h3>🔍 Arama ve Rapor</h3>"))
-    display(widgets.HBox([search_box, search_btn]))
-    display(widgets.HBox([list_btn, download_excel_btn, download_all_btn]))
-
-def start_system():
-    clear_output()
-    show_header()
-    display_form()
-    display_main()
-
-start_system()
+    with open(DATA_FILE, "rb") as file:
+        st.download_button(
+            label="Excel Dosyasını İndir",
+            data=file,
+            file_name="CFS_KAYITLARI.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
