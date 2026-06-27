@@ -182,7 +182,6 @@ elif menu == "Delivery Order Kaydı":
     parsed = {k:"" for k in ["Container No","DO No","BL No","Acente","Consignee","Vessel","Voyage","Size/Type","Seal No","EXP Date"]}
     uploaded_pdf = st.file_uploader("Delivery Order PDF seç", type=["pdf"])
 pdf_saved_path = ""
-
 if uploaded_pdf is not None:
     try:
         text = extract_pdf_text(uploaded_pdf)
