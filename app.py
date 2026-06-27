@@ -181,8 +181,7 @@ elif menu == "Delivery Order Kaydı":
 
     parsed = {k:"" for k in ["Container No","DO No","BL No","Acente","Consignee","Vessel","Voyage","Size/Type","Seal No","EXP Date"]}
     uploaded_pdf = st.file_uploader("Delivery Order PDF seç", type=["pdf"])
-
-    pdf_saved_path = ""
+pdf_saved_path = ""
 
 if uploaded_pdf is not None:
     try:
@@ -201,7 +200,6 @@ if uploaded_pdf is not None:
 
     except Exception as e:
         st.error(f"PDF okunamadı: {e}")
-
     c1,c2 = st.columns(2)
     with c1:
         container_no = st.text_input("Container No", parsed["Container No"])
