@@ -7,6 +7,8 @@ import os
 from datetime import datetime, date
 
 DATA_FILE = "CFS_KAYITLARI.xlsx"
+PDF_FOLDER = "DO_PDF_ARCHIVE"
+os.makedirs(PDF_FOLDER, exist_ok=True)
 
 USERS = {
     "admin": {"password": "1234", "role": "Admin"},
@@ -18,7 +20,7 @@ COLUMNS = [
     "Kayıt Tarihi", "Container No", "DO No", "BL No", "Acente", "Consignee",
     "Vessel", "Voyage", "Size/Type", "Seal No", "EXP Date", "CFS Durumu",
     "Açım Tarihi", "Cargo Type", "Quantity", "Hasar Durumu", "Delivery Tarihi",
-    "Truck No", "Driver Name", "Released By", "Kayıt Yapan", "Not"
+    "Truck No", "Driver Name", "Released By", "Kayıt Yapan", "PDF Dosya Yolu", "Not"
 ]
 
 st.set_page_config(page_title="ALPORT CFS SYSTEM", page_icon="⚓", layout="wide")
@@ -180,12 +182,25 @@ elif menu == "Delivery Order Kaydı":
     parsed = {k:"" for k in ["Container No","DO No","BL No","Acente","Consignee","Vessel","Voyage","Size/Type","Seal No","EXP Date"]}
     uploaded_pdf = st.file_uploader("Delivery Order PDF seç", type=["pdf"])
 
-    if uploaded_pdf is not None:
-        try:
-            parsed = parse_do(extract_pdf_text(uploaded_pdf))
-            st.success("PDF okundu. Bilgileri kontrol edip kaydedin.")
-        except Exception as e:
-            st.error(f"PDF okunamadı: {e}")
+    pdf_saved_path = ""
+
+if uploaded_pdf is not None:
+    try:
+        text = extract_pdf_text(uploaded_pdf)
+        parsed = parse_do(text)
+
+        temp_container = parsed["Container No"] if parsed["Container No"] else "UNKNOWN"
+        safe_name = f"{temp_container}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        pdf_saved_path = os.path.join(PDF_FOLDER, safe_name)
+
+        with open(pdf_saved_path, "wb") as f:
+            f.write(uploaded_pdf.getbuffer())
+
+        st.success("PDF okundu ve arşive kaydedildi.")
+        st.info(f"PDF Dosya Yolu: {pdf_saved_path}")
+
+    except Exception as e:
+        st.error(f"PDF okunamadı: {e}")
 
     c1,c2 = st.columns(2)
     with c1:
@@ -242,8 +257,9 @@ elif menu == "Delivery Order Kaydı":
                 "Truck No": truck_no.strip(),
                 "Driver Name": driver_name.strip(),
                 "Released By": released_by.strip(),
-                "Kayıt Yapan": st.session_state.username,
-                "Not": note.strip()
+              "Kayıt Yapan": st.session_state.username,
+"PDF Dosya Yolu": pdf_saved_path,
+"Not": note.strip()
             }
             df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
             save_data(df)
